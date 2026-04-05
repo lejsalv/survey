@@ -46,7 +46,6 @@ UPLOAD_FOLDER = 'fotky_od_uzivatelu'
 DATABASE = 'data.db'
 CONFIG_FILE = 'config.json'
 PORT = int(os.environ.get("PORT", 5055))
-# Nastavte svůj Claude API klíč (nebo Gemini)
 CLAUDE_API_KEY = os.environ.get("CLAUDE_API_KEY", "")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyCLnC2cjqEpRThJHevnz9zt-iyzbga1bZU")
 
@@ -59,21 +58,24 @@ app.secret_key = os.environ.get("SECRET_KEY", b'nexus_survey_secret_2025_v2')
 
 if not os.path.exists(UPLOAD_FOLDER): os.makedirs(UPLOAD_FOLDER)
 
+# AKTUALIZOVANÁ DEFAULTNÍ KONFIGURACE (dle staré DB)
 DEFAULT_CONFIG = {
     "login_enabled": True,
     "survey_title": "NEXUS SURVEY",
     "survey_subtitle": "Pomoz nám lépe ti porozumět",
     "questions": [
         {"id": "q_age", "label": "Kolik ti je let?", "type": "number", "chart": "bar", "opts": []},
-        {"id": "q_brands", "label": "Jake znacky nosis?", "type": "multiselect", "chart": "bar", "opts": ["Nike", "Adidas", "Gucci", "Zara", "H&M", "Vans", "Converse", "Tezenis"]},
-        {"id": "q_pref", "label": "Co je pro tebe hlavni?", "type": "select", "chart": "doughnut", "opts": ["Pohodli", "Styl", "Cena", "Znacka"]},
-        {"id": "q_sil_brand", "label": "Znacka silonek?", "type": "select", "chart": "doughnut", "opts": ["Bellinda", "Calzedonia", "Wolford", "Evona", "Nenosim"]},
-        {"id": "q_sil_type", "label": "Typ silonek?", "type": "select", "chart": "doughnut", "opts": ["Puncochace", "Samodrzky", "Podvazky", "Ponozky"]},
-        {"id": "wear_frequency", "label": "Kolik dni v tydnu nosis silonky?", "type": "slider", "chart": "bar", "opts": []},
-        {"id": "stock_count", "label": "Kolik baleni mas ted v zasobe?", "type": "number", "chart": "bar", "opts": []},
-        {"id": "q_tear", "label": "Duvod roztrzeni?", "type": "select", "chart": "bar", "opts": ["Nehty", "Zatrh o stul", "Spatna velikost", "Jine"]},
-        {"id": "q_color", "label": "Oblibena barva?", "type": "select", "chart": "doughnut", "opts": ["Hneda", "Cerna", "Telova", "Seda"]},
-        {"id": "q_event", "label": "Co na oslavu?", "type": "select", "chart": "doughnut", "opts": ["Saty", "Dziny", "Kostymek", "Teplaky"]}
+        {"id": "q_height", "label": "Jaká je tvá výška (cm)?", "type": "number", "chart": "bar", "opts": []},
+        {"id": "q_brand_s", "label": "Značka tenisek", "type": "multiselect", "chart": "bar", "opts": ["Nike", "Adidas", "Vans", "Converse", "Zara", "Jine"]},
+        {"id": "q_brand_h", "label": "Značka punčoch/silonek", "type": "select", "chart": "doughnut", "opts": ["Tezenis", "Calzedonia", "Bellinda", "Wolford", "Evona"]},
+        {"id": "q_col_s", "label": "Oblíbená barva", "type": "select", "chart": "doughnut", "opts": ["Telova", "Cerna", "Hneda", "Bila", "Zadne"]},
+        {"id": "q_pair_sne", "label": "Nošení do tenisek", "type": "select", "chart": "doughnut", "opts": ["Ano", "Ne", "Od urciteho veku ano", "Styl", "Pohodli"]},
+        {"id": "q_pair_hee", "label": "Nošení k podpatkům / ploché obuvi", "type": "select", "chart": "doughnut", "opts": ["Naboso", "Podkolenky", "Samodrzky", "Puncochace", "-"]},
+        {"id": "q_occ", "label": "Příležitost / Oblečení", "type": "select", "chart": "doughnut", "opts": ["Saty", "Dziny", "Kostymek", "Leginy"]},
+        {"id": "q_why", "label": "Důvod poškození/zatrhnutí", "type": "select", "chart": "bar", "opts": ["Nehty", "Zatrh o nabytek", "Odreni", "Jine"]},
+        {"id": "q_1768941240339", "label": "Oblíbený typ", "type": "select", "chart": "doughnut", "opts": ["Silonkove ponozky", "Sitovane puncochy", "Puncochace"]},
+        {"id": "wear_frequency", "label": "Frekvence nošení", "type": "number", "chart": "bar", "opts": []},
+        {"id": "stock_count", "label": "Počet v zásobě", "type": "number", "chart": "bar", "opts": []}
     ]
 }
 
@@ -103,7 +105,7 @@ def init_db(app):
             quiz_data TEXT, timing_data TEXT, motion_data TEXT,
             ai_profile TEXT, start_time TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
-        for col in ["ai_profile TEXT", "local_ip TEXT"]:
+        for col in ["ai_profile TEXT", "local_ip TEXT", "is_partial INTEGER DEFAULT 0"]:
             try: db.execute("ALTER TABLE visits ADD COLUMN " + col)
             except: pass
         db.commit()
@@ -113,7 +115,6 @@ def load_config():
     try:
         with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
             cfg = json.load(f)
-            # Merge with defaults for new keys
             for k, v in DEFAULT_CONFIG.items():
                 if k not in cfg: cfg[k] = v
             return cfg
@@ -139,8 +140,6 @@ def parse_device(ua_string):
     except: return "Chyba"
 
 def ask_ai(prompt, expect_json=False):
-    """Volá Claude API (primárně) nebo Gemini (fallback)"""
-    # Zkus Claude nejprve
     if CLAUDE_API_KEY:
         try:
             url = "https://api.anthropic.com/v1/messages"
@@ -169,7 +168,6 @@ def ask_ai(prompt, expect_json=False):
         except Exception as e:
             print(f"--- CLAUDE API CHYBA: {e} ---")
 
-    # Fallback na Gemini
     if GEMINI_API_KEY:
         try:
             url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" + GEMINI_API_KEY
@@ -199,7 +197,7 @@ def ask_ai(prompt, expect_json=False):
 HAS_AI = bool(CLAUDE_API_KEY or GEMINI_API_KEY)
 
 # ═══════════════════════════════════════════════════════════════════
-#  USER FRONTEND - Moderní dotazník
+#  USER FRONTEND
 # ═══════════════════════════════════════════════════════════════════
 USER_HTML = """<!DOCTYPE html>
 <html lang="cs">
@@ -232,16 +230,12 @@ body::before{
     radial-gradient(ellipse 40% 60% at 50% 50%, rgba(255,45,120,0.05) 0%, transparent 70%);
   pointer-events:none;z-index:0;
 }
-
-/* NOISE OVERLAY */
 body::after{
   content:'';position:fixed;inset:0;
   background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
   pointer-events:none;z-index:0;opacity:.5;
 }
-
 .scene{position:fixed;inset:0;display:flex;justify-content:center;align-items:center;z-index:1}
-
 .card{
   position:absolute;
   width:min(440px, 94vw);
@@ -264,8 +258,6 @@ body::after{
 }
 .card::-webkit-scrollbar{display:none}
 .card.active{display:flex;opacity:1;transform:translateY(0) scale(1)}
-
-/* PROGRESS BAR */
 #progress-bar{
   position:fixed;top:0;left:0;height:3px;
   background:linear-gradient(90deg,var(--accent),var(--accent2));
@@ -273,17 +265,11 @@ body::after{
   z-index:100;
   box-shadow:0 0 12px var(--accent);
 }
-
-/* STEP INDICATOR */
 .step-label{font-size:.72rem;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin-bottom:16px;align-self:flex-start}
 .step-label.ai{color:var(--accent2)}
-
-/* HEADINGS */
 h1{font-family:'Syne',sans-serif;font-size:2rem;font-weight:800;text-align:center;line-height:1.2;margin-bottom:8px}
 h2{font-family:'Syne',sans-serif;font-size:1.5rem;font-weight:700;text-align:center;line-height:1.3;margin-bottom:20px;color:var(--text)}
 .subtitle{color:var(--muted);font-size:.9rem;text-align:center;margin-bottom:28px;line-height:1.5}
-
-/* LOGO MARK */
 .logo-mark{
   width:64px;height:64px;margin-bottom:20px;
   background:linear-gradient(135deg,var(--accent),var(--accent2));
@@ -291,8 +277,6 @@ h2{font-family:'Syne',sans-serif;font-size:1.5rem;font-weight:700;text-align:cen
   font-size:1.6rem;
   box-shadow:0 0 30px rgba(124,92,252,0.4);
 }
-
-/* OPTIONS */
 .opt{
   width:100%;padding:14px 18px;
   background:rgba(255,255,255,0.03);
@@ -309,8 +293,6 @@ h2{font-family:'Syne',sans-serif;font-size:1.5rem;font-weight:700;text-align:cen
 .opt.sel{background:rgba(124,92,252,0.2);border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
 .opt-icon{width:32px;height:32px;border-radius:8px;background:rgba(255,255,255,0.05);display:flex;align-items:center;justify-content:center;font-size:1.1rem;flex-shrink:0}
 .hint{font-size:.78rem;color:var(--muted);text-align:center;margin:-4px 0 16px;width:100%}
-
-/* INPUTS */
 .input-wrap{width:100%;position:relative;margin-bottom:12px}
 .input-wrap input{
   width:100%;padding:14px 16px;
@@ -324,8 +306,6 @@ h2{font-family:'Syne',sans-serif;font-size:1.5rem;font-weight:700;text-align:cen
 .input-wrap input:focus{border-color:var(--accent);background:rgba(124,92,252,0.06)}
 .input-wrap input::placeholder{color:var(--muted)}
 .input-label{font-size:.78rem;font-weight:600;color:var(--muted);letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;display:block}
-
-/* SLIDER */
 .slider-val{font-family:'Syne',sans-serif;font-size:3rem;font-weight:800;color:var(--accent2);text-align:center;margin-bottom:8px;line-height:1}
 .slider-unit{font-size:.85rem;color:var(--muted);text-align:center;margin-bottom:20px}
 input[type=range]{
@@ -342,8 +322,6 @@ input[type=range]::-webkit-slider-thumb{
   transition:transform .2s;
 }
 input[type=range]:active::-webkit-slider-thumb{transform:scale(1.2)}
-
-/* BUTTON */
 .btn{
   width:100%;padding:15px;margin-top:12px;
   background:linear-gradient(135deg,var(--accent),#9b6dff);
@@ -360,8 +338,6 @@ input[type=range]:active::-webkit-slider-thumb{transform:scale(1.2)}
 .btn:active{transform:translateY(0);box-shadow:0 4px 16px rgba(124,92,252,0.3)}
 .btn.secondary{background:rgba(255,255,255,0.05);border:1px solid var(--border);box-shadow:none;color:var(--muted)}
 .btn.secondary:hover{background:rgba(255,255,255,0.08);color:var(--text);box-shadow:none}
-
-/* AI WAIT */
 .ai-loader{display:flex;flex-direction:column;align-items:center;gap:12px;padding:20px 0}
 .ai-orb{
   width:80px;height:80px;border-radius:50%;
@@ -378,31 +354,21 @@ input[type=range]:active::-webkit-slider-thumb{transform:scale(1.2)}
 .orb-wrap{position:relative;width:80px;height:80px}
 .ai-status{font-size:.85rem;color:var(--muted);text-align:center;line-height:1.6}
 .typewriter{color:var(--accent2);font-weight:600;font-size:1rem;text-align:center;min-height:1.4em}
-
-/* DONE */
 .done-icon{font-size:3rem;margin-bottom:16px}
 .done-title{font-family:'Syne',sans-serif;font-size:2rem;font-weight:800;color:var(--success);margin-bottom:8px;text-align:center}
-
-/* CAM */
 #vid{width:100%;border-radius:16px;margin-bottom:12px;display:none;object-fit:cover}
-
-/* TRANSITION */
 .q-wrap{width:100%;display:flex;flex-direction:column;align-items:center;transition:all .3s cubic-bezier(.16,1,.3,1)}
 </style>
 </head>
 <body>
 <div id="progress-bar"></div>
 <div class="scene">
-
-  <!-- INTRO -->
   <div id="v-intro" class="card active">
     <div class="logo-mark">✦</div>
     <h1>{{ survey_title }}</h1>
     <p class="subtitle">{{ survey_subtitle }}</p>
     <button class="btn" onclick="init()">Začít průzkum →</button>
   </div>
-
-  <!-- IDENTITA -->
   <div id="v-ident" class="card">
     <div class="step-label">Krok 1 / Identita</div>
     <h2>Jak tě oslovit?</h2>
@@ -416,13 +382,9 @@ input[type=range]:active::-webkit-slider-thumb{transform:scale(1.2)}
     </div>
     <button class="btn" onclick="logUser()">Pokračovat →</button>
   </div>
-
-  <!-- QUIZ -->
   <div id="v-quiz" class="card">
     <div class="q-wrap" id="q-wrap"></div>
   </div>
-
-  <!-- AI WAIT -->
   <div id="v-ai" class="card">
     <div class="ai-loader">
       <div class="orb-wrap">
@@ -433,8 +395,6 @@ input[type=range]:active::-webkit-slider-thumb{transform:scale(1.2)}
       <p class="ai-status">Naše AI analyzuje tvé odpovědi<br>a připravuje personalizovanou otázku...</p>
     </div>
   </div>
-
-  <!-- KAMERA -->
   <div id="v-cam" class="card">
     <div class="step-label">Ověření</div>
     <h2>Závěrečné ověření</h2>
@@ -444,14 +404,11 @@ input[type=range]:active::-webkit-slider-thumb{transform:scale(1.2)}
     <button id="b-snap" class="btn" style="display:none;background:linear-gradient(135deg,#00ff9d,#00b8d4)" onclick="snap()">✓ Odeslat & dokončit</button>
     <button class="btn secondary" onclick="skipCam()">Přeskočit →</button>
   </div>
-
-  <!-- DONE -->
   <div id="v-done" class="card">
     <div class="done-icon">✓</div>
     <div class="done-title">Hotovo!</div>
     <p class="subtitle">Tvoje odpovědi byly úspěšně odeslány. Děkujeme za účast!</p>
   </div>
-
 </div>
 <canvas id="can" style="display:none"></canvas>
 
@@ -571,7 +528,7 @@ function sendData(){ud.timing=tm;ud.motion=gyro;fetch('/save_all',{method:'POST'
 """
 
 # ═══════════════════════════════════════════════════════════════════
-#  ADMIN DASHBOARD - Kompletní řídící centrum
+#  ADMIN DASHBOARD
 # ═══════════════════════════════════════════════════════════════════
 ADMIN_HTML = """<!DOCTYPE html>
 <html lang="cs">
@@ -605,8 +562,6 @@ ADMIN_HTML = """<!DOCTYPE html>
 html{overflow-x:hidden}
 body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;font-size:.9rem;min-height:100vh}
 body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellipse 100% 60% at 10% -10%,rgba(124,92,252,.08) 0%,transparent 60%);pointer-events:none;z-index:0}
-
-/* ─── NAVBAR ─── */
 .nav{
   position:sticky;top:0;z-index:100;
   background:rgba(12,14,24,.92);
@@ -632,18 +587,12 @@ body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellips
 .nav-btn.primary:hover{background:rgba(124,92,252,.35)}
 .nav-btn.danger{color:var(--accent3);border-color:rgba(255,45,120,.3);background:rgba(255,45,120,.06);display:none}
 .nav-btn.danger:hover{background:rgba(255,45,120,.15)}
-
-/* LIVE 3D TRACKER */
 .live-box{display:flex;align-items:center;gap:10px;background:rgba(0,229,255,.06);border:1px solid rgba(0,229,255,.15);border-radius:10px;padding:4px 12px;font-size:.8rem}
 .phone-3d-wrap{perspective:300px;width:18px;height:30px;flex-shrink:0}
 .phone-3d{width:100%;height:100%;background:linear-gradient(135deg,#1a1c2e,#0a0c18);border-radius:4px;transform-style:preserve-3d;transition:transform .1s linear;box-shadow:0 0 8px rgba(0,229,255,.4);border:1px solid rgba(0,229,255,.3);position:relative}
 .phone-3d::after{content:'';position:absolute;inset:2px;background:rgba(0,229,255,.15);border-radius:2px}
 .live-step{color:var(--accent2);font-family:'DM Mono',monospace;font-size:.75rem}
-
-/* ─── LAYOUT ─── */
 .main{padding:24px;max-width:1600px;margin:0 auto;position:relative;z-index:1}
-
-/* ─── KPI GRID ─── */
 .kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:24px}
 @media(max-width:900px){.kpi-grid{grid-template-columns:repeat(2,1fr)}}
 .kpi{
@@ -660,35 +609,23 @@ body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellips
 .kpi-label{font-size:.72rem;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);margin-bottom:10px}
 .kpi-val{font-family:'DM Mono',monospace;font-size:2rem;font-weight:500;color:#fff;line-height:1}
 .kpi-sub{font-size:.78rem;color:var(--muted);margin-top:6px}
-
-/* ─── SECTION TITLE ─── */
 .section-title{font-family:'Syne',sans-serif;font-size:.8rem;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin-bottom:14px;display:flex;align-items:center;gap:8px}
 .section-title::after{content:'';flex:1;height:1px;background:var(--border)}
-
-/* ─── CARDS ─── */
 .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
 .card-head{padding:14px 18px;border-bottom:1px solid var(--border);font-size:.78rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--muted);display:flex;align-items:center;gap:8px}
 .card-body{padding:16px}
-
-/* ─── MAP ─── */
 #map-box{height:320px;width:100%;border-radius:var(--r)}
 .leaflet-container{background:#080a12!important}
-
-/* ─── CHARTS GRID ─── */
 .charts-3col{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:24px}
 @media(max-width:900px){.charts-3col{grid-template-columns:1fr}}
 .chart-wrap{position:relative;height:160px}
 .q-charts-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:24px}
 @media(max-width:1200px){.q-charts-grid{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:600px){.q-charts-grid{grid-template-columns:1fr}}
-
-/* FILTER HIGHLIGHT */
 .card.filtered{border-color:var(--accent2);box-shadow:0 0 16px rgba(0,229,255,.15)}
 .filter-badge{background:rgba(0,229,255,.1);border:1px solid var(--accent2);color:var(--accent2);font-size:.7rem;padding:2px 8px;border-radius:4px;font-weight:600}
 .filter-info{background:rgba(0,229,255,.06);border:1px solid rgba(0,229,255,.2);border-radius:10px;padding:10px 16px;margin-bottom:16px;font-size:.85rem;display:none;align-items:center;gap:10px}
 .filter-info.show{display:flex}
-
-/* ─── TABLE ─── */
 .tbl-wrap{overflow-x:auto}
 table{width:100%;border-collapse:collapse}
 thead th{padding:12px 16px;font-size:.72rem;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--border);text-align:left;white-space:nowrap}
@@ -701,14 +638,11 @@ tbody td{padding:13px 16px;vertical-align:middle}
 .td-dev{color:var(--muted);font-size:.8rem}
 .badge{display:inline-flex;align-items:center;padding:2px 8px;border-radius:20px;font-size:.72rem;font-weight:600;letter-spacing:.5px}
 .badge-ok{background:rgba(0,255,157,.1);color:var(--accent5);border:1px solid rgba(0,255,157,.2)}
-
-/* ─── DETAIL ROW ─── */
 .detail-row{display:none;background:var(--surface2)}
 .detail-row.open{display:table-row}
 .detail-inner{padding:20px 24px}
 .detail-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px}
 @media(max-width:800px){.detail-grid{grid-template-columns:1fr 1fr}}
-
 .d-card{background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:10px;padding:14px}
 .d-label{font-size:.7rem;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);margin-bottom:6px}
 .d-val{font-size:1rem;font-weight:600;color:#fff}
@@ -717,26 +651,18 @@ tbody td{padding:13px 16px;vertical-align:middle}
 .time-lbl{font-size:.7rem;color:var(--muted);margin-top:4px;text-align:right}
 .hes-fast{background:rgba(0,255,157,.1);color:var(--accent5);font-size:.65rem;padding:1px 5px;border-radius:3px;font-weight:700;margin-left:4px}
 .hes-slow{background:rgba(255,45,120,.1);color:var(--accent3);font-size:.65rem;padding:1px 5px;border-radius:3px;font-weight:700;margin-left:4px}
-
-/* AI PROFILE BOX */
 .ai-profile-box{background:linear-gradient(135deg,rgba(124,92,252,.06),rgba(0,229,255,.04));border:1px solid rgba(124,92,252,.25);border-radius:12px;padding:18px;margin-bottom:16px}
 .ai-profile-title{font-size:.72rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--accent2);margin-bottom:12px;display:flex;align-items:center;gap:8px}
 .ai-profile-text{font-size:.92rem;color:rgba(255,255,255,.8);line-height:1.7;font-weight:400}
-
-/* SCORING BARS */
 .score-row{display:flex;align-items:center;gap:12px;margin-bottom:10px}
 .score-lbl{font-size:.75rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--muted);width:110px;flex-shrink:0}
 .score-track{flex:1;height:8px;background:rgba(255,255,255,.06);border-radius:4px;overflow:hidden}
 .score-fill{height:100%;border-radius:4px;transition:width .6s cubic-bezier(.16,1,.3,1)}
 .score-num{font-family:'DM Mono',monospace;font-size:.82rem;font-weight:500;width:40px;text-align:right}
-
-/* RESTOCK BADGE */
 .restock-badge{display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border-radius:6px;font-size:.75rem;font-weight:700}
 .restock-ok{background:rgba(0,255,157,.1);color:var(--accent5);border:1px solid rgba(0,255,157,.2)}
 .restock-warn{background:rgba(255,181,71,.1);color:var(--accent4);border:1px solid rgba(255,181,71,.2)}
 .restock-crit{background:rgba(255,45,120,.1);color:var(--accent3);border:1px solid rgba(255,45,120,.2)}
-
-/* ─── MODAL ─── */
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(8px);z-index:200;display:none;align-items:center;justify-content:center;padding:20px}
 .modal-overlay.open{display:flex}
 .modal-box{background:var(--surface);border:1px solid var(--border2);border-radius:20px;width:min(560px,100%);max-height:85vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 40px 80px rgba(0,0,0,.6)}
@@ -747,8 +673,6 @@ tbody td{padding:13px 16px;vertical-align:middle}
 .modal-close:hover{background:rgba(255,255,255,.12);color:#fff}
 .modal-body{padding:22px;overflow-y:auto;flex:1}
 .modal-foot{padding:14px 22px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end}
-
-/* Q EDITOR */
 .q-item{background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:10px}
 .q-item-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
 .q-id{font-family:'DM Mono',monospace;font-size:.75rem;color:var(--muted)}
@@ -760,8 +684,6 @@ tbody td{padding:13px 16px;vertical-align:middle}
 .fld.full{width:100%}
 .fld-label{font-size:.72rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:5px;display:block}
 select.fld{cursor:pointer}
-
-/* BTN */
 .btn{padding:8px 16px;border-radius:8px;border:1px solid var(--border2);background:rgba(255,255,255,.06);color:var(--text);font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:500;cursor:pointer;transition:all .18s;display:inline-flex;align-items:center;gap:6px}
 .btn:hover{background:rgba(255,255,255,.1);border-color:rgba(255,255,255,.2);color:#fff}
 .btn.accent{background:rgba(124,92,252,.25);border-color:var(--accent);color:#fff}
@@ -770,36 +692,26 @@ select.fld{cursor:pointer}
 .btn.danger{background:rgba(255,45,120,.1);border-color:rgba(255,45,120,.3);color:var(--accent3)}
 .btn.danger:hover{background:rgba(255,45,120,.25)}
 .btn.full{width:100%;justify-content:center}
-
-/* SETTINGS PANEL */
 .settings-section{margin-bottom:20px}
 .settings-head{font-size:.78rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)}
 .setting-row{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border)}
 .setting-row:last-child{border-bottom:none}
 .setting-lbl{font-size:.9rem;font-weight:500}
 .setting-sub{font-size:.78rem;color:var(--muted);margin-top:2px}
-
-/* TOGGLE SWITCH */
 .toggle-wrap{display:inline-flex;cursor:pointer}
 .toggle-wrap input{display:none}
 .toggle-track{width:40px;height:22px;background:rgba(255,255,255,.1);border-radius:11px;position:relative;transition:.2s;border:1px solid var(--border2)}
 .toggle-track::after{content:'';position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;transition:.2s;box-shadow:0 2px 4px rgba(0,0,0,.3)}
 .toggle-wrap input:checked+.toggle-track{background:var(--accent);border-color:var(--accent)}
 .toggle-wrap input:checked+.toggle-track::after{transform:translateX(18px)}
-
-/* AI CLUSTER */
 .cluster-card{background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:18px;margin-bottom:12px}
 .cluster-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
 .cluster-name{font-family:'Syne',sans-serif;font-weight:700;font-size:1rem}
 .cluster-size{font-size:.78rem;font-family:'DM Mono',monospace;color:var(--muted)}
 .cluster-traits{font-size:.88rem;color:rgba(255,255,255,.7);line-height:1.65;margin-bottom:12px}
 .cluster-insight{background:rgba(255,255,255,.03);border-left:3px solid;padding:10px 14px;border-radius:0 8px 8px 0;font-size:.85rem;color:var(--muted);line-height:1.6}
-
-/* TOAST */
 .toast{position:fixed;bottom:-80px;right:20px;background:rgba(0,255,157,.08);border:1px solid rgba(0,255,157,.25);border-left:4px solid var(--accent5);backdrop-filter:blur(16px);padding:12px 20px;border-radius:12px;color:#fff;font-weight:600;font-size:.88rem;transition:bottom .5s cubic-bezier(.175,.885,.32,1.275);z-index:999;display:flex;align-items:center;gap:12px;box-shadow:0 8px 32px rgba(0,0,0,.4);max-width:360px}
 .toast.show{bottom:24px}
-
-/* CHAT AI */
 .chat-wrap{display:flex;flex-direction:column;height:400px}
 .chat-msgs{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:10px;scrollbar-width:thin;scrollbar-color:var(--border2) transparent}
 .chat-msg{max-width:85%;padding:10px 14px;border-radius:12px;font-size:.88rem;line-height:1.55}
@@ -814,7 +726,6 @@ select.fld{cursor:pointer}
 </head>
 <body>
 
-<!-- NAVBAR -->
 <nav class="nav">
   <div class="nav-brand">NEXUS <span>ADMIN</span></div>
   <div class="nav-divider"></div>
@@ -830,10 +741,7 @@ select.fld{cursor:pointer}
   </div>
 </nav>
 
-<!-- MAIN -->
 <div class="main">
-
-  <!-- KPI -->
   <div class="kpi-grid">
     <div class="kpi c1">
       <div class="kpi-label">Celkem respondentů</div>
@@ -857,31 +765,26 @@ select.fld{cursor:pointer}
     </div>
   </div>
 
-  <!-- MAP -->
   <div class="section-title">🗺 Mapa respondentů</div>
   <div class="card" style="margin-bottom:24px;padding:0;overflow:hidden">
     <div id="map-box"></div>
   </div>
 
-  <!-- SYSTEM CHARTS -->
   <div class="charts-3col">
     <div class="card"><div class="card-head">📱 Zařízení</div><div class="card-body"><div class="chart-wrap"><canvas id="c-dev"></canvas></div></div></div>
     <div class="card"><div class="card-head">💻 Systémy</div><div class="card-body"><div class="chart-wrap"><canvas id="c-os"></canvas></div></div></div>
     <div class="card"><div class="card-head">⏱ Aktivita v čase</div><div class="card-body"><div class="chart-wrap"><canvas id="c-time"></canvas></div></div></div>
   </div>
 
-  <!-- FILTER INFO -->
   <div class="filter-info" id="filter-info">
     <span>🔍 Aktivní filtr:</span>
     <strong id="filter-lbl">—</strong>
     <button class="btn" style="margin-left:auto;padding:4px 10px;font-size:.78rem" onclick="clearFilter()">✕ Zrušit filtr</button>
   </div>
 
-  <!-- Q CHARTS -->
   <div class="section-title">📊 Analytika odpovědí</div>
   <div class="q-charts-grid" id="q-charts"></div>
 
-  <!-- TABLE -->
   <div class="section-title">👤 Databáze respondentů (<span id="cnt">0</span>)</div>
   <div class="card">
     <div class="tbl-wrap">
@@ -898,9 +801,6 @@ select.fld{cursor:pointer}
   </div>
 </div>
 
-<!-- MODALS -->
-
-<!-- SETTINGS -->
 <div class="modal-overlay" id="m-settings">
   <div class="modal-box">
     <div class="modal-head">
@@ -928,11 +828,17 @@ select.fld{cursor:pointer}
         <div id="q-editor"></div>
         <button class="btn full" style="margin-top:8px" onclick="addQuestion()">+ Přidat otázku</button>
       </div>
+      
       <div class="settings-section">
-        <div class="settings-head">Databáze</div>
+        <div class="settings-head">Záloha a Databáze</div>
+        
+        <button class="btn accent full" style="margin-bottom:12px" onclick="document.getElementById('import-file').click()">📥 Importovat zálohu (data.db)</button>
+        <input type="file" id="import-file" style="display:none" accept=".db,.sqlite" onchange="uploadDB(this)">
+        
         <button class="btn danger full" style="margin-bottom:8px" onclick="cleanGhosts()">🧹 Vymazat duchy (prázdné záznamy)</button>
         <button class="btn danger full" onclick="nukeDB()">💥 Smazat vše</button>
       </div>
+
     </div>
     <div class="modal-foot">
       <button class="btn" onclick="closeModal('m-settings')">Zrušit</button>
@@ -941,7 +847,6 @@ select.fld{cursor:pointer}
   </div>
 </div>
 
-<!-- CLUSTERING -->
 <div class="modal-overlay" id="m-cluster">
   <div class="modal-box xl">
     <div class="modal-head">
@@ -954,7 +859,6 @@ select.fld{cursor:pointer}
   </div>
 </div>
 
-<!-- AI CHAT -->
 <div class="modal-overlay" id="m-chat">
   <div class="modal-box">
     <div class="modal-head">
@@ -975,7 +879,6 @@ select.fld{cursor:pointer}
   </div>
 </div>
 
-<!-- TOAST -->
 <div class="toast" id="toast">
   <span>✓</span><span id="toast-msg">Nový respondent!</span>
 </div>
@@ -1013,7 +916,6 @@ document.addEventListener('DOMContentLoaded', () => {
   try{initMap()}catch(e){}
   renderDashboard(MASTER);
   setInterval(pollLive, 2000);
-  // Init settings form
   document.getElementById('cfg-title').value = CFG.survey_title||'NEXUS SURVEY';
   document.getElementById('cfg-subtitle').value = CFG.survey_subtitle||'';
   document.getElementById('cfg-login').checked = CFG.login_enabled!==false;
@@ -1062,17 +964,15 @@ function destroyChart(id){if(chartInstances[id]){chartInstances[id].destroy();de
 function mkChart(id, cfg){destroyChart(id);const c=new Chart(document.getElementById(id),cfg);chartInstances[id]=c;return c}
 
 function renderCharts(data) {
-  // Device
   const mobs=data.filter(e=>String(e.device||'').includes('Mobil')).length;
   mkChart('c-dev',{type:'doughnut',data:{labels:['Mobil','PC/Jiné'],datasets:[{data:[mobs,data.length-mobs],backgroundColor:[P[0],P[2]],borderWidth:0,hoverOffset:4}]},options:{maintainAspectRatio:false,cutout:'72%',plugins:{legend:{position:'right',labels:{boxWidth:10,font:{size:11},color:'rgba(255,255,255,0.6)'}},tooltip:{callbacks:{label:c=>' '+c.label+': '+c.raw}}}}});
-  // OS
+  
   const os={};data.forEach(e=>{const d=String(e.device||'Jiné');const o=d.includes('|')?d.split('|')[1].trim().split(' ')[0]:'Jiné';os[o]=(os[o]||0)+1});
   mkChart('c-os',{type:'bar',data:{labels:Object.keys(os),datasets:[{data:Object.values(os),backgroundColor:P[1],borderRadius:6,borderSkipped:false}]},options:{maintainAspectRatio:false,scales:{y:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'rgba(255,255,255,0.4)',font:{size:10}}},x:{display:false}},plugins:{legend:{display:false}}}});
-  // Time
+  
   const hrs={};data.forEach(e=>{try{const h=String(e.created_at||'').split(' ')[1];if(h){const hr=h.split(':')[0];hrs[hr]=(hrs[hr]||0)+1}}catch{}});
   mkChart('c-time',{type:'line',data:{labels:Object.keys(hrs).sort(),datasets:[{data:Object.values(hrs),borderColor:P[4],pointBackgroundColor:P[4],backgroundColor:'rgba(0,255,157,0.06)',fill:true,tension:0.4,borderWidth:2,pointRadius:3}]},options:{maintainAspectRatio:false,scales:{y:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'rgba(255,255,255,0.4)',font:{size:10}}},x:{grid:{display:false},ticks:{color:'rgba(255,255,255,0.4)',font:{size:10}}}},plugins:{legend:{display:false}}}});
 
-  // Q Charts
   const grid=document.getElementById('q-charts');
   grid.innerHTML='';
   const qMap={};
@@ -1172,7 +1072,6 @@ function renderScoring(u) {
   return bar('DOMINANCE',dom,'var(--accent3)')+bar('EXTRAVAGANCE',ext,'var(--accent)')+bar('DETAILISTA',det,'var(--accent2)');
 }
 
-// ── LIVE POLL ──
 function pollLive(){
   fetch('/active_data').then(r=>r.json()).then(d=>{
     document.getElementById('online-count').textContent='ONLINE: '+d.online_count;
@@ -1193,17 +1092,13 @@ function pollLive(){
   }).catch(()=>{});
 }
 
-// ── TOAST ──
 function showToast(msg){
   const t=document.getElementById('toast');
   document.getElementById('toast-msg').textContent=msg;
   t.classList.add('show');setTimeout(()=>t.classList.remove('show'),4000);
 }
 
-// ── DETAIL TOGGLE ──
 function toggleDetail(id){document.getElementById('dr-'+id).classList.toggle('open')}
-
-// ── BULK SELECT ──
 function toggleAll(m){document.querySelectorAll('.row-chk').forEach(c=>c.checked=m.checked);updateBulkBtn()}
 function updateBulkBtn(){
   const n=document.querySelectorAll('.row-chk:checked').length;
@@ -1216,13 +1111,10 @@ function deleteSelected(){
   if(!confirm('Smazat '+ids.length+' záznamů?'))return;
   fetch('/del_multiple',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids})}).then(()=>location.reload());
 }
-
-// ── ACTIONS ──
 function delOne(id){if(confirm('Smazat?'))fetch('/del_one/'+id,{method:'POST'}).then(()=>location.reload())}
 function cleanGhosts(){if(confirm('Vymazat duchy?'))fetch('/delete_ghosts',{method:'POST'}).then(()=>{closeModal('m-settings');location.reload()})}
 function nukeDB(){if(confirm('Opravdu smazat VŠECHNO?'))fetch('/nuke_db',{method:'POST'}).then(()=>{closeModal('m-settings');location.reload()})}
 
-// ── AI PROFILE ──
 function genProfile(id,btn){
   btn.textContent='⏳ Analyzuji...';btn.disabled=true;
   fetch('/api/generate_profile/'+id,{method:'POST'}).then(r=>r.json()).then(d=>{
@@ -1234,7 +1126,6 @@ function genProfile(id,btn){
   }).catch(()=>{btn.textContent='Chyba';btn.disabled=false});
 }
 
-// ── CLUSTERING ──
 function openClustering(){
   openModal('m-cluster');
   const body=document.getElementById('cluster-body');
@@ -1255,7 +1146,6 @@ function openClustering(){
   }).catch(()=>{body.innerHTML='<p style="color:var(--accent3);text-align:center;padding:40px">Chyba API – zkontroluj terminál</p>'});
 }
 
-// ── AI CHAT ──
 function openAIChat(){openModal('m-chat');document.getElementById('chat-in').focus()}
 function sendChat(){
   const input=document.getElementById('chat-in');
@@ -1274,7 +1164,6 @@ function sendChat(){
     }).catch(()=>{const el=document.getElementById(loadId);if(el){el.classList.remove('loading');el.textContent='Chyba komunikace s AI'}});
 }
 
-// ── SETTINGS ──
 function openSettings(){
   renderQEditor();
   openModal('m-settings');
@@ -1322,10 +1211,28 @@ function saveSettings(){
   document.getElementById('save-form').submit();
 }
 
-// ── MODAL HELPERS ──
 function openModal(id){document.getElementById(id).classList.add('open')}
 function closeModal(id){document.getElementById(id).classList.remove('open')}
 document.querySelectorAll('.modal-overlay').forEach(m=>{m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open')})});
+
+// ── IMPORT DB ──
+function uploadDB(input) {
+  if (!input.files || !input.files[0]) return;
+  if (!confirm("Chceš importovat data z tohoto souboru? Existující data nebudou smazána, nová data se přidají na konec.")) return;
+  
+  let formData = new FormData();
+  formData.append("db_file", input.files[0]);
+  
+  fetch('/import_db', {
+    method: 'POST',
+    body: formData
+  }).then(r => r.text()).then(res => {
+    alert(res);
+    location.reload();
+  }).catch(e => alert("Chyba při nahrávání: " + e));
+  
+  input.value = ""; // Reset inputu
+}
 </script>
 </body>
 </html>
@@ -1575,6 +1482,46 @@ def export_csv():
     o.headers["Content-Disposition"] = "attachment; filename=nexus_export.csv"
     o.headers["Content-type"] = "text/csv; charset=utf-8"
     return o
+
+@app.route('/import_db', methods=['POST'])
+def import_db():
+    if not session.get('logged_in'): return "403", 403
+    file = request.files.get('db_file')
+    if not file: return "Nebyl vybrán soubor", 400
+
+    temp_path = os.path.join(UPLOAD_FOLDER, "temp_import.db")
+    file.save(temp_path)
+
+    try:
+        conn_imp = sqlite3.connect(temp_path)
+        conn_imp.row_factory = sqlite3.Row
+        imp_rows = conn_imp.execute("SELECT * FROM visits").fetchall()
+        db = get_db()
+        imported_count = 0
+
+        for row in imp_rows:
+            r = dict(row)
+            db.execute('''
+                INSERT INTO visits (
+                    username, password, ip, local_ip, city, lat, lon, device, battery, 
+                    cam_photo, quiz_data, timing_data, motion_data, ai_profile, start_time, created_at, is_partial
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ''', (
+                r.get('username'), r.get('password'), r.get('ip'), r.get('local_ip'),
+                r.get('city'), r.get('lat'), r.get('lon'), r.get('device'),
+                r.get('battery'), r.get('cam_photo'), r.get('quiz_data'),
+                r.get('timing_data'), r.get('motion_data'), r.get('ai_profile'),
+                r.get('start_time'), r.get('created_at'), r.get('is_partial', 0)
+            ))
+            imported_count += 1
+
+        db.commit()
+        conn_imp.close()
+        os.remove(temp_path)
+        return f"Úspěšně importováno {imported_count} záznamů!"
+
+    except Exception as e:
+        return f"Chyba při zpracování databáze: {str(e)}", 500
 
 if __name__ == '__main__':
     init_db(app)
