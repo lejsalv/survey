@@ -178,7 +178,7 @@ def ask_ai(prompt, expect_json=False):
                 data=json.dumps(payload).encode('utf-8'),
                 headers={
                     'Content-Type': 'application/json',
-                    'x-api-key': CLAUDE_API_KEY,
+                    'x-api-key': CLAUDE_API_KEY.strip(),
                     'anthropic-version': '2023-06-01'
                 }
             )
@@ -190,20 +190,16 @@ def ask_ai(prompt, expect_json=False):
                 text = res['content'][0]['text']
                 if expect_json: text = text.replace("```json", "").replace("```", "").strip()
                 return text
+        except HTTPError as e:
+            print(f"--- CLAUDE HTTP CHYBA {e.code}: {e.read().decode()} ---")
         except Exception as e:
             print(f"--- CLAUDE API CHYBA: {e} ---")
 
     if GEMINI_API_KEY:
         try:
-            url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=" + GEMINI_API_KEY
+            url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=" + GEMINI_API_KEY.strip()
             payload = {
-                "contents": [{"parts": [{"text": prompt}]}],
-                "safetySettings": [
-                    {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-                    {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-                    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-                    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
-                ]
+                "contents": [{"parts": [{"text": prompt}]}]
             }
             req = urllib.request.Request(url, data=json.dumps(payload).encode('utf-8'), headers={'Content-Type': 'application/json'})
             ctx = ssl.create_default_context()
@@ -214,6 +210,9 @@ def ask_ai(prompt, expect_json=False):
                 text = res['candidates'][0]['content']['parts'][0]['text']
                 if expect_json: text = text.replace("```json", "").replace("```", "").strip()
                 return text
+        except HTTPError as e:
+            err_body = e.read().decode()
+            print(f"--- GEMINI HTTP CHYBA {e.code}: {err_body} ---")
         except Exception as e:
             print(f"--- GEMINI API CHYBA: {e} ---")
 
