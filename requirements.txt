@@ -1,3 +1,4 @@
 flask
 waitress
 user-agents
+psycopg2-binary
