@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-NEXUS SURVEY SYSTEM v3.0 (PostgreSQL Edition)
+NEXUS SURVEY SYSTEM v3.1 (PostgreSQL + Debug AI Edition)
 Moderní přepis SpyHub PRO - připraveno pro Endoru a Render (Trvalá databáze)
 """
 import os, json, time, base64, logging, sqlite3, urllib.request, ssl
@@ -53,7 +53,9 @@ UPLOAD_FOLDER = 'fotky_od_uzivatelu'
 CONFIG_FILE = 'config.json'
 PORT = int(os.environ.get("PORT", 5055))
 CLAUDE_API_KEY = os.environ.get("CLAUDE_API_KEY", "")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyCLnC2cjqEpRThJHevnz9zt-iyzbga1bZU")
+
+# Tvůj klíč natvrdo vložený do kódu pro absolutní jistotu
+GEMINI_API_KEY = "AIzaSyDpqVeOfY82BLuh_hpDPHjQPkd92FYnlhM"
 
 # TVOJE POSTGRESQL DATABÁZE (Trvalé úložiště)
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://nexus_db_85j3_user:zyhZ0BfUb2XG9Z7cT2Mep7qGvAWztCVi@dpg-d795vs3uibrs73c34iv0-a/nexus_db_85j3")
@@ -90,7 +92,6 @@ DEFAULT_CONFIG = {
 active_users_cache = {}
 
 class DBWrapper:
-    """Wrapper pro sjednocení syntaxe PostgreSQL s původním kódem"""
     def __init__(self, conn):
         self.conn = conn
 
@@ -191,9 +192,12 @@ def ask_ai(prompt, expect_json=False):
                 if expect_json: text = text.replace("```json", "").replace("```", "").strip()
                 return text
         except HTTPError as e:
-            print(f"--- CLAUDE HTTP CHYBA {e.code}: {e.read().decode()} ---")
+            err_body = e.read().decode()
+            print(f"--- CLAUDE HTTP CHYBA {e.code}: {err_body} ---", flush=True)
+            if not expect_json: return f"❌ Claude API zamítlo požadavek: {err_body}"
         except Exception as e:
-            print(f"--- CLAUDE API CHYBA: {e} ---")
+            print(f"--- CLAUDE API CHYBA: {e} ---", flush=True)
+            if not expect_json: return f"❌ Interní chyba: {str(e)}"
 
     if GEMINI_API_KEY:
         try:
@@ -212,9 +216,11 @@ def ask_ai(prompt, expect_json=False):
                 return text
         except HTTPError as e:
             err_body = e.read().decode()
-            print(f"--- GEMINI HTTP CHYBA {e.code}: {err_body} ---")
+            print(f"--- GEMINI HTTP CHYBA {e.code}: {err_body} ---", flush=True)
+            if not expect_json: return f"❌ GOOGLE ZAMÍTL POŽADAVEK (Chyba {e.code}): {err_body}"
         except Exception as e:
-            print(f"--- GEMINI API CHYBA: {e} ---")
+            print(f"--- GEMINI API CHYBA: {e} ---", flush=True)
+            if not expect_json: return f"❌ INTERNÍ CHYBA: {str(e)}"
 
     return None
 
@@ -1333,9 +1339,9 @@ def get_adaptive_question():
     if HAS_AI:
         prompt = "Analyzuj odpovedi zakaznice: " + json.dumps(quiz, ensure_ascii=False) + ". Vymysli 1 kratkoupsychologickou otazku na miru (CZ, bez diakritiky). Vrat POUZE JSON: {\"id\": \"AI_BONUS\", \"label\": \"[otazka]\", \"opts\": [\"[A]\", \"[B]\", \"[C]\"]}"
         ai_resp = ask_ai(prompt, expect_json=True)
-        if ai_resp:
+        if ai_resp and "{" in ai_resp:
             try:
-                if "{" in ai_resp: ai_resp = ai_resp[ai_resp.find("{"):ai_resp.rfind("}")+1]
+                ai_resp = ai_resp[ai_resp.find("{"):ai_resp.rfind("}")+1]
                 return jsonify(json.loads(ai_resp))
             except: pass
     return jsonify({"id": "ZACHRANA", "label": "Jak bys popsala svuj styl jednim slovem?", "opts": ["Minimalisticky", "Vyrázny", "Sportovni"]})
@@ -1347,11 +1353,11 @@ def generate_profile(uid):
     if not row or not HAS_AI: return jsonify({"error": "Chybi data nebo AI"})
     prompt = f"""Jsi expert na behavioralni psychologii. Analyzuj tato data zakaznice: {row['quiz_data']}. Vypracuj strucny psychologicky profil (max 3 vety). Pis vecne, analyticky, bez diakritiky."""
     profile = ask_ai(prompt)
-    if profile:
+    if profile and not profile.startswith("❌"):
         db.execute("UPDATE visits SET ai_profile=%s WHERE id=%s", (profile, uid))
         db.commit()
         return jsonify({"profile": profile})
-    return jsonify({"error": "Selhalo"})
+    return jsonify({"error": profile or "Selhalo"})
 
 @app.route('/api/clusters')
 def get_clusters():
@@ -1370,8 +1376,8 @@ def get_clusters():
     prompt = f"""Jsi analytik. Analyzuj {len(dataset)} respondentu: {json.dumps(dataset, ensure_ascii=False)}. Rozdel do 3 skupin podle chování a preferencí. Pro každou skupinu vytvoř objekt JSON. Vrat POUZE JSON pole se 3 objekty, kazdy s poli: "name" (krátky název skupiny), "size" (počet), "traits" (stručný popis chování, bez diakritiky), "insight" (klíčový poznatek, bez diakritiky). BEZ diakritiky v celé odpovědi."""
     try:
         ai_resp = ask_ai(prompt, expect_json=True)
-        if ai_resp:
-            if "[" in ai_resp: ai_resp = ai_resp[ai_resp.find("["):ai_resp.rfind("]")+1]
+        if ai_resp and "[" in ai_resp:
+            ai_resp = ai_resp[ai_resp.find("["):ai_resp.rfind("]")+1]
             return jsonify(json.loads(ai_resp))
     except Exception as e:
         print("Chyba clusteringu:", e)
@@ -1549,7 +1555,6 @@ def export_csv():
 
 @app.route('/import_db', methods=['POST'])
 def import_db():
-    """Tato funkce čte starou SQLite zálohu (data.db) a kopíruje ji do nového PostgreSQL"""
     if not session.get('logged_in'): return "403", 403
     file = request.files.get('db_file')
     if not file: return "Nebyl vybrán soubor", 400
@@ -1592,7 +1597,7 @@ if __name__ == '__main__':
     init_db(app)
     ai_status = "Claude" if CLAUDE_API_KEY else ("Gemini" if GEMINI_API_KEY else "BEZ AI")
     print(f"╔══════════════════════════════════════╗")
-    print(f"║   NEXUS SURVEY SYSTEM v3.0 (PSQL)    ║")
+    print(f"║   NEXUS SURVEY SYSTEM v3.1           ║")
     print(f"║   Port: {PORT:<28} ║")
     print(f"║   AI: {ai_status:<30} ║")
     print(f"║   Admin: /admin  Heslo: {ADMIN_PASSWORD:<12} ║")
