@@ -196,7 +196,7 @@ def ask_ai(prompt, expect_json=False, max_tokens=1024):
                 "generationConfig": {"maxOutputTokens": max_tokens}
             }).encode("utf-8")
 
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+            url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash-latest:generateContent?key={GEMINI_API_KEY}"
             req = urllib.request.Request(
                 url,
                 data=payload,
@@ -1164,15 +1164,6 @@ def import_db():
     except Exception as e:
         return f"Chyba: {str(e)}", 500
 
-@app.route('/debug_ai')
-def debug_ai():
-    result = ask_ai("Rekni ahoj")
-    return jsonify({
-        "claude_key": CLAUDE_API_KEY[:15] + "..." if CLAUDE_API_KEY else "CHYBI",
-        "gemini_key": GEMINI_API_KEY[:15] + "..." if GEMINI_API_KEY else "CHYBI",
-        "ai_result": result,
-        "has_ai": HAS_AI
-    })
 # ═══════════════════════════════════════════════════════════════════
 #  START
 # ═══════════════════════════════════════════════════════════════════
