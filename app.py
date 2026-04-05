@@ -1164,6 +1164,15 @@ def import_db():
     except Exception as e:
         return f"Chyba: {str(e)}", 500
 
+@app.route('/debug_ai')
+def debug_ai():
+    result = ask_ai("Rekni ahoj")
+    return jsonify({
+        "claude_key": CLAUDE_API_KEY[:15] + "..." if CLAUDE_API_KEY else "CHYBI",
+        "gemini_key": GEMINI_API_KEY[:15] + "..." if GEMINI_API_KEY else "CHYBI",
+        "ai_result": result,
+        "has_ai": HAS_AI
+    })
 # ═══════════════════════════════════════════════════════════════════
 #  START
 # ═══════════════════════════════════════════════════════════════════
